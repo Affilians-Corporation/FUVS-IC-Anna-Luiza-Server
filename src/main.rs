@@ -1,36 +1,89 @@
 use defs::{Theme, SubTheme};
+use rocket::response::{content, status};
 use rocket::{fs::FileServer, http::Status};
 use rocket::serde::json::Json;
+use memory::{ MemoryDatabase, DatabaseError };
 
 pub mod defs;
+pub mod memory;
 
 #[macro_use] extern crate rocket;
 
 const FILES_PATH: &'static str = r"C:\Users\matteusmaximo\Documents\anna-luiza-server\files";
+const FLUSH_TIME: tokio::time::Duration = tokio::time::Duration::from_secs(5);
 
 #[get("/theme/<name>")]
-fn theme(name: &str) -> String {
-    for i in std::fs::read_dir(FILES_PATH).unwrap() {
-        match i {
-            Ok(a) => {
-                if a.file_name().to_str().unwrap() == name {
-                    let str_theme = std::fs::read_to_string(format!("{}/{}", FILES_PATH, a.file_name().to_str().unwrap())).unwrap();
-                    return str_theme
-                }
-            }, Err(_) => continue
+fn theme(name: &str) -> status::Custom<content::RawJson<String>> {
+    println!("Request Received");
+    match MemoryDatabase::singleton().get(name.to_string()) {
+        Some(a) => {
+            match serde_json::to_string(&a) {
+                Ok(j) => return status::Custom(Status::Ok, content::RawJson(j)),
+                Err(_) => return status::Custom(Status::InternalServerError, content::RawJson("{\"msg\": \"Error parsing json\"}".to_string()))
+            }
+        }, None => {
+            return status::Custom(Status::NotFound, content::RawJson("\"msg\": \"Theme not found in database\"".to_string()))
         }
     }
- 
-    return "Internal Server Error".to_string()
 }
 
 #[post("/theme", data = "<input>")]
-fn put_theme(input: Json<Theme>) -> Status {
-    let theme = input.into_inner();
-    let res = std::fs::write(format!("{}/{}.json", FILES_PATH, theme.name.to_lowercase()), serde_json::to_string(&theme).unwrap());
-    match res {
-        Ok(_) => return Status::Ok,
-        Err(_) => return Status::InternalServerError
+fn set_theme(input: Json<Theme>) -> status::Custom<content::RawJson<String>> {
+   let parsed_theme: Theme = input.into_inner();
+   match MemoryDatabase::singleton().set(parsed_theme.name.clone(), parsed_theme) {
+       Ok(_) => return status::Custom(Status::Ok, content::RawJson("".to_string())),
+       Err(e) => {
+           match e {
+               DatabaseError::WouldBlock => return status::Custom(
+                                                Status::InternalServerError, 
+                                                content::RawJson("{\"reason\": \"WouldBlock\"}".to_string())
+                                            ),
+               DatabaseError::LockIsPoisoned => return status::Custom(
+                                                Status::InternalServerError, 
+                                                content::RawJson("{\"reason\": \"Poisoned\"}".to_string())
+                                            ),
+               DatabaseError::EntryDoesNotExist(_) => return status::Custom(
+                                                Status::InternalServerError, 
+                                                content::RawJson("{\"reason\": \"EntryDoesNotExist\"}".to_string())
+                                            ),
+               DatabaseError::DiskEntryDoesNotExist(_) => return status::Custom(
+                                                Status::InternalServerError,
+                                                content::RawJson("{\"reason\": \"DiskEntryDoesNotExist\"}".to_string())
+                                            ),
+                                            _ => return status::Custom(
+                                                Status::InternalServerError, 
+                                                content::RawJson("{\"reason\": \"Unknown\"}".to_string())
+                                            )
+           }
+       }
+   }
+}
+
+#[put("/theme", data = "<input>")]
+fn put_theme(input: Json<Theme>) -> status::Custom<content::RawJson<String>> {
+    let parsed_theme: Theme = input.into_inner();
+    match MemoryDatabase::singleton().insert(parsed_theme) {
+        Ok(_) => return status::Custom(Status::Ok, content::RawJson("".to_string())),
+        Err(e) => {
+            match e {
+                DatabaseError::WouldBlock => return status::Custom(
+                                                Status::InternalServerError,
+                                                content::RawJson("{\"reason\": \"WouldBlock\"}".to_string())
+                                            ),
+                DatabaseError::LockIsPoisoned => return status::Custom( 
+                                                Status::InternalServerError, 
+                                                content::RawJson("{\"reason\": \"Poisoned\"}".to_string()) 
+                                            ),
+                DatabaseError::EntryAlreadyExists(_) => return status::Custom(
+                                                Status::InternalServerError, 
+                                                content::RawJson("{\"reason\": \"EntryAlreadyExists\"}".to_string())
+                                            ),
+                                            _ => return status::Custom ( 
+                                                Status::InternalServerError, 
+                                                content::RawJson("{\"reason\": \"Unknown\"}".to_string())
+                                            )
+            }
+        }
     }
 }
 
@@ -48,9 +101,18 @@ fn index() -> &'static str {
     "Hello, World!"
 }
 
-#[launch]
-fn rocket() -> _{
+#[tokio::main]
+async fn main() {
+    let db = MemoryDatabase::singleton();
+    tokio::spawn(async move {
+        MemoryDatabase::singleton().start_timer(FLUSH_TIME).await;
+    });
+    db.insert(Theme::new("Test15"));
+    db.insert(Theme::new("Test39"));
+
+    println!("{:?}", db);
+
     rocket::build()
-        .mount("/", routes![index, theme, put_theme, del_theme])
-        .mount("/res", FileServer::from(FILES_PATH))
+        .mount("/", routes![index, theme, put_theme, del_theme, set_theme])
+        .mount("/res", FileServer::from(FILES_PATH)).launch().await;
 }

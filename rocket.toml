@@ -1,0 +1,5 @@
+[default]
+address = "0.0.0.0"
+limits = { form = "1 MiB", json = "10 Mib" }
+workers = 500
+max_blocking = 10
