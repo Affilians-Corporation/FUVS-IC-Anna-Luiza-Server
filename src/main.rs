@@ -24,10 +24,23 @@ fn theme(name: &str) -> String {
     return "Internal Server Error".to_string()
 }
 
-#[post("/new_theme", data = "<input>")]
+#[post("/theme", data = "<input>")]
 fn put_theme(input: Json<Theme>) -> Status {
-    println!("{:?}", input);
-    return Status::Ok
+    let theme = input.into_inner();
+    let res = std::fs::write(format!("{}/{}.json", FILES_PATH, theme.name.to_lowercase()), serde_json::to_string(&theme).unwrap());
+    match res {
+        Ok(_) => return Status::Ok,
+        Err(_) => return Status::InternalServerError
+    }
+}
+
+#[delete("/theme/<name>")]
+fn del_theme(name: &str) -> Status {
+    let res = std::fs::remove_file(format!("{}/{}.json", FILES_PATH, name.to_lowercase()));
+    match res {
+        Ok(_) => return Status::Ok,
+        Err(_) => return Status::InternalServerError
+    }
 }
 
 #[get("/")]
@@ -38,6 +51,6 @@ fn index() -> &'static str {
 #[launch]
 fn rocket() -> _{
     rocket::build()
-        .mount("/", routes![index, theme, put_theme])
+        .mount("/", routes![index, theme, put_theme, del_theme])
         .mount("/res", FileServer::from(FILES_PATH))
 }

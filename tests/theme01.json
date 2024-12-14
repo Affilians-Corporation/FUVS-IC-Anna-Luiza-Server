@@ -1,0 +1,25 @@
+{
+  "name": "Test",
+  "sub_themes": [
+    {
+      "name": "TestSub01",
+      "difficulties": [
+        {
+          "level": "Easy",
+          "questions": [
+            {
+              "id": 0,
+              "resources": [
+                {
+                  "resource_name": "test",
+                  "resource_type": "Text",
+                  "resource_uri": "/res/test/testsub01/easy/0.txt"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
