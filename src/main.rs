@@ -1,16 +1,48 @@
+use std::mem::MaybeUninit;
+use std::sync::Once;
 use defs::{Theme, SubTheme};
 use rocket::response::{content, status};
 use rocket::{fs::FileServer, http::Status};
 use rocket::serde::json::Json;
 use memory::{ MemoryDatabase, DatabaseError };
+use serde::Deserialize;
 
 pub mod defs;
 pub mod memory;
 
 #[macro_use] extern crate rocket;
 
-const FILES_PATH: &'static str = r"C:\Users\matteusmaximo\Documents\anna-luiza-server\files";
-const FLUSH_TIME: tokio::time::Duration = tokio::time::Duration::from_secs(5);
+// const FILES_PATH: &'static str = r"C:\Users\matteusmaximo\Documents\anna-luiza-server\files";
+// const FLUSH_TIME: tokio::time::Duration = tokio::time::Duration::from_secs(5);
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ServerConfiguration {
+    pub files_path: String,
+    pub flush_frequency: u64
+}
+
+impl ServerConfiguration {
+    pub fn new(path: &str) -> Self {
+        let config_str = std::fs::read_to_string(path).unwrap();
+        return toml::from_str(config_str.as_str()).unwrap()
+    }
+
+    pub fn get_flush_frequency(&self) -> tokio::time::Duration {
+        return tokio::time::Duration::from_secs(self.flush_frequency)
+    }
+
+    pub fn singleton() -> &'static ServerConfiguration{
+        static mut SINGLETON: MaybeUninit<ServerConfiguration> = MaybeUninit::uninit();
+        static ONCE: Once = Once::new();
+        unsafe {
+            ONCE.call_once(|| {
+                let singleton = ServerConfiguration::new(std::env::var("IC_CONFIG_PATH").unwrap().as_str());
+                SINGLETON.write(singleton);
+            });
+            SINGLETON.assume_init_ref()
+        }
+    }
+}
 
 #[get("/theme/<name>")]
 fn theme(name: &str) -> status::Custom<content::RawJson<String>> {
@@ -87,14 +119,14 @@ fn put_theme(input: Json<Theme>) -> status::Custom<content::RawJson<String>> {
     }
 }
 
-#[delete("/theme/<name>")]
+/* #[delete("/theme/<name>")]
 fn del_theme(name: &str) -> Status {
     let res = std::fs::remove_file(format!("{}/{}.json", FILES_PATH, name.to_lowercase()));
     match res {
         Ok(_) => return Status::Ok,
         Err(_) => return Status::InternalServerError
     }
-}
+}*/
 
 #[get("/")]
 fn index() -> &'static str {
@@ -105,7 +137,7 @@ fn index() -> &'static str {
 async fn main() {
     let db = MemoryDatabase::singleton();
     tokio::spawn(async move {
-        MemoryDatabase::singleton().start_timer(FLUSH_TIME).await;
+        MemoryDatabase::singleton().start_timer(ServerConfiguration::singleton().get_flush_frequency()).await;
     });
     db.insert(Theme::new("Test15"));
     db.insert(Theme::new("Test39"));
@@ -113,6 +145,6 @@ async fn main() {
     println!("{:?}", db);
 
     rocket::build()
-        .mount("/", routes![index, theme, put_theme, del_theme, set_theme])
-        .mount("/res", FileServer::from(FILES_PATH)).launch().await;
+        .mount("/", routes![index, theme, put_theme, set_theme])
+        .mount("/res", FileServer::from(ServerConfiguration::singleton().files_path.clone())).launch().await;
 }

@@ -2,7 +2,7 @@ use std::{arch::asm, collections::HashMap, io::{BufReader, Read}, mem::MaybeUnin
 
 use rocket::tokio;
 
-use crate::{defs::Theme, FILES_PATH};
+use crate::{defs::Theme, ServerConfiguration};
 
 #[derive(Debug, Clone)]
 pub enum DatabaseError {
@@ -29,7 +29,7 @@ pub struct MemoryDatabase {
 impl MemoryDatabase {
     pub fn new () -> Self {
         let mut existing_themes: HashMap<String, Instance> = HashMap::new();
-        for i in std::fs::read_dir(FILES_PATH).unwrap() {
+        for i in std::fs::read_dir(ServerConfiguration::singleton().files_path.clone()).unwrap() {
             match i {
                 Ok(a) => {
                     existing_themes.insert(a.file_name().into_string().unwrap().replace(".json", ""), Instance::Disk);
@@ -67,14 +67,14 @@ impl MemoryDatabase {
     }
 
     fn peek_disk(&self, name: &String) -> Result<(), ()>{
-        match std::fs::File::open(format!("{}/{}.json", FILES_PATH, name.to_lowercase())) {
+        match std::fs::File::open(format!("{}/{}.json", ServerConfiguration::singleton().files_path, name.to_lowercase())) {
             Ok(_) => return Ok(()),
             Err(_) => return Err(())
         }
     }
 
     fn get_from_disk(&self, name: &String) -> Result<Theme, DatabaseError> {
-        match std::fs::File::open(format!("{}/{}.json", FILES_PATH, name.to_lowercase())) {
+        match std::fs::File::open(format!("{}/{}.json", ServerConfiguration::singleton().files_path, name.to_lowercase())) {
             Ok(mut a) => {
                 let mut str: String = String::new();
                 a.read_to_string(&mut str);
@@ -95,14 +95,14 @@ impl MemoryDatabase {
     }
 
     fn insert_to_disk(&self, value: Theme) -> Result<(), ()> {
-        match std::fs::write(format!("{}/{}.json", FILES_PATH, value.name.to_lowercase()), serde_json::to_string(&value).unwrap()) {
+        match std::fs::write(format!("{}/{}.json", ServerConfiguration::singleton().files_path, value.name.to_lowercase()), serde_json::to_string(&value).unwrap()) {
             Ok(_) => return Ok(()),
             Err(_) => return Err(())
         }
     }
 
     fn remove_from_disk(&self, name: &String) -> Result<(), ()> {
-        match std::fs::remove_file(format!("{}/{}.json", FILES_PATH, name.clone().to_lowercase())) {
+        match std::fs::remove_file(format!("{}/{}.json", ServerConfiguration::singleton().files_path, name.clone().to_lowercase())) {
             Ok(_) => return Ok(()),
             Err(_) => return Err(())
         }
@@ -211,11 +211,11 @@ impl MemoryDatabase {
     pub fn flush(&self) -> Result<(), DatabaseError> {
         match self.loaded_themes.try_read() {
             Ok(map) => {
-                for i in std::fs::read_dir(FILES_PATH).unwrap() {
+                for i in std::fs::read_dir(ServerConfiguration::singleton().files_path.clone()).unwrap() {
                     match i {
                         Ok(a) => {
                             if !map.contains_key(&a.file_name().into_string().unwrap().replace(".json", "")) {
-                                std::fs::remove_file(format!("{}/{}", FILES_PATH, a.file_name().into_string().unwrap()));
+                                std::fs::remove_file(format!("{}/{}", ServerConfiguration::singleton().files_path, a.file_name().into_string().unwrap()));
                             }
                         },
                         Err(_) => return Err(DatabaseError::FailedWritingToDisk)
@@ -225,7 +225,7 @@ impl MemoryDatabase {
                     match v {
                         Instance::Disk => continue,
                         Instance::Memory(theme) => {
-                            std::fs::write(format!("{}/{}.json", FILES_PATH, k.to_lowercase()), serde_json::to_string(theme).unwrap());
+                            std::fs::write(format!("{}/{}.json", ServerConfiguration::singleton().files_path, k.to_lowercase()), serde_json::to_string(theme).unwrap());
                         }
                     }
                 }
@@ -246,7 +246,7 @@ pub mod memory_test {
 
     use rocket::tokio;
 
-    use crate::{defs::Theme, FILES_PATH};
+    use crate::{defs::Theme, ServerConfiguration};
 
     use super::{Instance, MemoryDatabase};
 
@@ -264,13 +264,13 @@ pub mod memory_test {
         
         assert!(db.get("Test1".to_string()).is_some());
         db.flush();
-        assert!(std::fs::exists(format!("{}/{}", FILES_PATH, "test1.json")).unwrap());
+        assert!(std::fs::exists(format!("{}/{}", ServerConfiguration::singleton().files_path, "test1.json")).unwrap());
         
         db.set("Test1".to_string(), Theme::new("Test2"));
         assert!(db.get("Test1".to_string()).is_none());
         
         db.flush();
-        assert!(!std::fs::exists(format!("{}/{}", FILES_PATH, "test1.json")).unwrap());
+        assert!(!std::fs::exists(format!("{}/{}", ServerConfiguration::singleton().files_path, "test1.json")).unwrap());
     }
     
 
